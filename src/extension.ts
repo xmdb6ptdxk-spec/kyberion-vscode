@@ -2,10 +2,12 @@ import * as vscode from 'vscode';
 import { ForgeClient, getForgeClient } from './ForgeClient';
 import { ChatViewProvider } from './views/ChatViewProvider';
 import { FileHandler } from './integrations/FileHandler';
+import { DevAccessManager } from './integrations/DevAccessManager';
 
 let forgeClient: ForgeClient;
 let chatViewProvider: ChatViewProvider;
 let fileHandler: FileHandler;
+let devAccess: DevAccessManager;
 let statusBarItem: vscode.StatusBarItem;
 
 export function activate(context: vscode.ExtensionContext) {
@@ -17,8 +19,12 @@ export function activate(context: vscode.ExtensionContext) {
 
     forgeClient = getForgeClient(wsUrl);
     fileHandler = new FileHandler();
+    devAccess = new DevAccessManager();
 
-    chatViewProvider = new ChatViewProvider(context.extensionUri, forgeClient, fileHandler);
+    // DevAccessManager global verfügbar machen
+    (global as any).kyberionDevAccess = devAccess;
+
+    chatViewProvider = new ChatViewProvider(context.extensionUri, forgeClient, fileHandler, devAccess);
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(
             'kyberion.chatView',
@@ -54,7 +60,7 @@ export function activate(context: vscode.ExtensionContext) {
         });
     }
 
-    console.log('Kyberion Forge Extension aktiviert!');
+    console.log('🔓 Kyberion Forge Extension aktiviert mit vollen DEV-Berechtigungen!');
 }
 
 function registerCommands(context: vscode.ExtensionContext) {

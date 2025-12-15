@@ -7,6 +7,7 @@
 import * as vscode from 'vscode';
 import { ForgeClient, ChatMessage, ForgeResponse, ForgePlan, ForgePlanStep } from '../ForgeClient';
 import { FileHandler } from '../integrations/FileHandler';
+import { DevAccessManager } from '../integrations/DevAccessManager';
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'kyberion.chatView';
@@ -22,7 +23,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     constructor(
         private readonly extensionUri: vscode.Uri,
         private readonly forgeClient: ForgeClient,
-        private readonly fileHandler: FileHandler
+        private readonly fileHandler: FileHandler,
+        private readonly devAccess?: DevAccessManager
     ) {}
 
     public resolveWebviewView(
