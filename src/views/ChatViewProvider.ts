@@ -2,6 +2,7 @@
  * 💬 CHAT VIEW PROVIDER
  * =====================
  * Webview-Provider für das Chat-UI mit Plan/Act Modus
+ * NEU: Multi-Tab-Support für parallele Konversationen
  */
 
 import * as vscode from 'vscode';
@@ -9,23 +10,169 @@ import { ForgeClient, ChatMessage, ForgeResponse, ForgePlan, ForgePlanStep } fro
 import { FileHandler } from '../integrations/FileHandler';
 import { DevAccessManager } from '../integrations/DevAccessManager';
 
+// Tab-Struktur für Multi-Chat
+interface ChatTab {
+    id: string;
+    name: string;
+    messageHistory: ChatMessage[];
+    attachedFiles: { name: string; content: string }[];
+    isPlanMode: boolean;
+    currentPlan: ForgePlan | null;
+    createdAt: Date;
+}
+
 export class ChatViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'kyberion.chatView';
 
     private view?: vscode.WebviewView;
-    private messageHistory: ChatMessage[] = [];
+    
+    // Multi-Tab Support
+    private tabs: ChatTab[] = [];
+    private activeTabId: string = '';
+    private maxTabs: number = 10;
+    
+    // Legacy-Kompatibilität
+    private get messageHistory(): ChatMessage[] {
+        const tab = this.getActiveTab();
+        return tab ? tab.messageHistory : [];
+    }
+    private set messageHistory(value: ChatMessage[]) {
+        const tab = this.getActiveTab();
+        if (tab) tab.messageHistory = value;
+    }
+    
+    private get attachedFiles(): { name: string; content: string }[] {
+        const tab = this.getActiveTab();
+        return tab ? tab.attachedFiles : [];
+    }
+    private set attachedFiles(value: { name: string; content: string }[]) {
+        const tab = this.getActiveTab();
+        if (tab) tab.attachedFiles = value;
+    }
+    
+    private get isPlanMode(): boolean {
+        const tab = this.getActiveTab();
+        return tab ? tab.isPlanMode : false;
+    }
+    private set isPlanMode(value: boolean) {
+        const tab = this.getActiveTab();
+        if (tab) tab.isPlanMode = value;
+    }
+    
+    private get currentPlan(): ForgePlan | null {
+        const tab = this.getActiveTab();
+        return tab ? tab.currentPlan : null;
+    }
+    private set currentPlan(value: ForgePlan | null) {
+        const tab = this.getActiveTab();
+        if (tab) tab.currentPlan = value;
+    }
+    
     private isConnected: boolean = false;
-    private isPlanMode: boolean = false;
-    private currentPlan: ForgePlan | null = null;
     private isExecuting: boolean = false;
-    private attachedFiles: { name: string; content: string }[] = [];
 
     constructor(
         private readonly extensionUri: vscode.Uri,
         private readonly forgeClient: ForgeClient,
         private readonly fileHandler: FileHandler,
         private readonly devAccess?: DevAccessManager
-    ) {}
+    ) {
+        // Ersten Tab erstellen
+        this.createTab('Chat 1');
+    }
+    
+    // ============ TAB MANAGEMENT ============
+    
+    private createTab(name?: string): ChatTab {
+        const id = `tab_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const tabName = name || `Chat ${this.tabs.length + 1}`;
+        
+        const tab: ChatTab = {
+            id,
+            name: tabName,
+            messageHistory: [],
+            attachedFiles: [],
+            isPlanMode: false,
+            currentPlan: null,
+            createdAt: new Date()
+        };
+        
+        this.tabs.push(tab);
+        this.activeTabId = id;
+        
+        console.log(`📑 Tab erstellt: ${tabName}`);
+        return tab;
+    }
+    
+    private getActiveTab(): ChatTab | undefined {
+        return this.tabs.find(t => t.id === this.activeTabId);
+    }
+    
+    private switchTab(tabId: string): void {
+        const tab = this.tabs.find(t => t.id === tabId);
+        if (tab) {
+            this.activeTabId = tabId;
+            this.syncTabToWebview();
+            console.log(`📑 Tab gewechselt: ${tab.name}`);
+        }
+    }
+    
+    private renameTab(tabId: string, newName: string): void {
+        const tab = this.tabs.find(t => t.id === tabId);
+        if (tab) {
+            tab.name = newName;
+            this.postMessage({ type: 'tabsUpdated', tabs: this.getTabsInfo(), activeTabId: this.activeTabId });
+        }
+    }
+    
+    private closeTab(tabId: string): void {
+        if (this.tabs.length <= 1) {
+            vscode.window.showWarningMessage('Mindestens ein Tab muss offen bleiben');
+            return;
+        }
+        
+        const index = this.tabs.findIndex(t => t.id === tabId);
+        if (index !== -1) {
+            this.tabs.splice(index, 1);
+            
+            // Wenn aktiver Tab geschlossen wurde, zum nächsten wechseln
+            if (this.activeTabId === tabId) {
+                this.activeTabId = this.tabs[Math.min(index, this.tabs.length - 1)].id;
+                this.syncTabToWebview();
+            } else {
+                this.postMessage({ type: 'tabsUpdated', tabs: this.getTabsInfo(), activeTabId: this.activeTabId });
+            }
+        }
+    }
+    
+    private getTabsInfo(): { id: string; name: string; messageCount: number }[] {
+        return this.tabs.map(t => ({
+            id: t.id,
+            name: t.name,
+            messageCount: t.messageHistory.length
+        }));
+    }
+    
+    private syncTabToWebview(): void {
+        const tab = this.getActiveTab();
+        if (!tab) return;
+        
+        // Tabs-Info senden
+        this.postMessage({ 
+            type: 'tabsUpdated', 
+            tabs: this.getTabsInfo(), 
+            activeTabId: this.activeTabId 
+        });
+        
+        // Chat-Verlauf des aktiven Tabs senden
+        this.postMessage({ 
+            type: 'tabContent', 
+            messages: tab.messageHistory,
+            attachedFiles: tab.attachedFiles.map(f => f.name),
+            isPlanMode: tab.isPlanMode,
+            plan: tab.currentPlan
+        });
+    }
 
     public resolveWebviewView(
         webviewView: vscode.WebviewView,
@@ -46,6 +193,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             const connected = this.forgeClient.isConnected();
             this.isConnected = connected;
             this.postMessage({ type: 'connectionStatus', connected: connected });
+            this.syncTabToWebview();
         }, 100);
 
         // Nachrichten vom Webview empfangen
@@ -83,6 +231,24 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                     break;
                 case 'clearChat':
                     this.clearChat();
+                    break;
+                // NEU: Tab-Operationen
+                case 'newTab':
+                    if (this.tabs.length < this.maxTabs) {
+                        this.createTab();
+                        this.syncTabToWebview();
+                    } else {
+                        vscode.window.showWarningMessage(`Maximal ${this.maxTabs} Tabs erlaubt`);
+                    }
+                    break;
+                case 'switchTab':
+                    this.switchTab(data.tabId);
+                    break;
+                case 'closeTab':
+                    this.closeTab(data.tabId);
+                    break;
+                case 'renameTab':
+                    this.renameTab(data.tabId, data.name);
                     break;
             }
         });
@@ -591,7 +757,22 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             '.welcome { text-align: center; padding: 40px 20px; color: var(--vscode-descriptionForeground); }',
             '.welcome-icon { font-size: 48px; margin-bottom: 16px; }',
             '.welcome-title { font-size: 18px; font-weight: bold; color: var(--vscode-editor-foreground); margin-bottom: 8px; }',
-            '.welcome-text { font-size: 13px; line-height: 1.6; }'
+            '.welcome-text { font-size: 13px; line-height: 1.6; }',
+            
+            '/* Tab Bar */',
+            '.tab-bar { display: flex; align-items: center; background: var(--vscode-tab-inactiveBackground); border-bottom: 1px solid var(--vscode-panel-border); overflow-x: auto; }',
+            '.tab-bar::-webkit-scrollbar { height: 4px; }',
+            '.tab-bar::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background); border-radius: 2px; }',
+            '.tab { display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: transparent; color: var(--vscode-tab-inactiveForeground); border: none; border-right: 1px solid var(--vscode-panel-border); cursor: pointer; font-size: 12px; white-space: nowrap; min-width: 80px; max-width: 150px; }',
+            '.tab:hover { background: var(--vscode-tab-hoverBackground); }',
+            '.tab.active { background: var(--vscode-tab-activeBackground); color: var(--vscode-tab-activeForeground); border-bottom: 2px solid var(--vscode-focusBorder); }',
+            '.tab-name { flex: 1; overflow: hidden; text-overflow: ellipsis; }',
+            '.tab-close { opacity: 0; font-size: 14px; padding: 2px 4px; border-radius: 3px; }',
+            '.tab:hover .tab-close { opacity: 0.7; }',
+            '.tab-close:hover { opacity: 1; background: var(--vscode-toolbar-hoverBackground); }',
+            '.tab-badge { background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); padding: 2px 6px; border-radius: 10px; font-size: 10px; }',
+            '.new-tab-btn { padding: 8px 12px; background: transparent; color: var(--vscode-foreground); border: none; cursor: pointer; font-size: 16px; }',
+            '.new-tab-btn:hover { background: var(--vscode-tab-hoverBackground); }'
         ].join('\n');
     }
 
@@ -600,6 +781,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
      */
     private getBodyHtml(): string {
         return [
+            '<!-- Tab Bar -->',
+            '<div class="tab-bar" id="tabBar">',
+            '  <div class="tab active" data-tab-id="initial">',
+            '    <span class="tab-name">Chat 1</span>',
+            '    <span class="tab-close" onclick="closeTab(event, \'initial\')">×</span>',
+            '  </div>',
+            '  <button class="new-tab-btn" onclick="newTab()" title="Neuer Tab">+</button>',
+            '</div>',
+            '',
             '<!-- Header -->',
             '<div class="header">',
             '  <div class="status-dot" id="statusDot"></div>',
@@ -673,8 +863,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             'let isConnected = false;',
             'let isPlanMode = false;',
             'let currentPlan = null;',
+            'let activeTabId = null;',
             '',
             '// Elemente',
+            'const tabBar = document.getElementById("tabBar");',
             'const chatContainer = document.getElementById("chatContainer");',
             'const planContainer = document.getElementById("planContainer");',
             'const welcome = document.getElementById("welcome");',
@@ -687,6 +879,109 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             'const planSteps = document.getElementById("planSteps");',
             'const planTitle = document.getElementById("planTitle");',
             'const planGoal = document.getElementById("planGoal");',
+            '',
+            '// ============ TAB FUNKTIONEN ============',
+            '',
+            'function newTab() {',
+            '  vscode.postMessage({ type: "newTab" });',
+            '}',
+            '',
+            'function switchTab(tabId) {',
+            '  if (tabId !== activeTabId) {',
+            '    vscode.postMessage({ type: "switchTab", tabId: tabId });',
+            '  }',
+            '}',
+            '',
+            'function closeTab(event, tabId) {',
+            '  event.stopPropagation();',
+            '  vscode.postMessage({ type: "closeTab", tabId: tabId });',
+            '}',
+            '',
+            'function renameTab(tabId) {',
+            '  const tab = document.querySelector("[data-tab-id=\'" + tabId + "\'] .tab-name");',
+            '  if (tab) {',
+            '    const currentName = tab.textContent;',
+            '    const newName = prompt("Tab umbenennen:", currentName);',
+            '    if (newName && newName.trim()) {',
+            '      vscode.postMessage({ type: "renameTab", tabId: tabId, name: newName.trim() });',
+            '    }',
+            '  }',
+            '}',
+            '',
+            'function updateTabs(tabs, newActiveTabId) {',
+            '  activeTabId = newActiveTabId;',
+            '  const newTabBtn = tabBar.querySelector(".new-tab-btn");',
+            '  tabBar.innerHTML = "";',
+            '  ',
+            '  tabs.forEach(function(tab) {',
+            '    const tabEl = document.createElement("div");',
+            '    tabEl.className = "tab" + (tab.id === activeTabId ? " active" : "");',
+            '    tabEl.setAttribute("data-tab-id", tab.id);',
+            '    tabEl.onclick = function() { switchTab(tab.id); };',
+            '    tabEl.ondblclick = function() { renameTab(tab.id); };',
+            '    ',
+            '    const nameSpan = document.createElement("span");',
+            '    nameSpan.className = "tab-name";',
+            '    nameSpan.textContent = tab.name;',
+            '    tabEl.appendChild(nameSpan);',
+            '    ',
+            '    if (tab.messageCount > 0) {',
+            '      const badge = document.createElement("span");',
+            '      badge.className = "tab-badge";',
+            '      badge.textContent = tab.messageCount;',
+            '      tabEl.appendChild(badge);',
+            '    }',
+            '    ',
+            '    const closeBtn = document.createElement("span");',
+            '    closeBtn.className = "tab-close";',
+            '    closeBtn.textContent = "×";',
+            '    closeBtn.onclick = function(e) { closeTab(e, tab.id); };',
+            '    tabEl.appendChild(closeBtn);',
+            '    ',
+            '    tabBar.appendChild(tabEl);',
+            '  });',
+            '  ',
+            '  const addBtn = document.createElement("button");',
+            '  addBtn.className = "new-tab-btn";',
+            '  addBtn.textContent = "+";',
+            '  addBtn.title = "Neuer Tab";',
+            '  addBtn.onclick = newTab;',
+            '  tabBar.appendChild(addBtn);',
+            '}',
+            '',
+            'function loadTabContent(data) {',
+            '  // Chat leeren',
+            '  chatContainer.innerHTML = "";',
+            '  ',
+            '  // Willkommen anzeigen wenn leer',
+            '  if (!data.messages || data.messages.length === 0) {',
+            '    const welcomeDiv = document.createElement("div");',
+            '    welcomeDiv.className = "welcome";',
+            '    welcomeDiv.id = "welcome";',
+            '    welcomeDiv.innerHTML = "<div class=\\"welcome-icon\\">🌟</div><div class=\\"welcome-title\\">Willkommen bei Kyberion</div><div class=\\"welcome-text\\">Ich bin dein KI-Assistent.<br>Verbinde dich mit dem Backend und starte eine Konversation.</div>";',
+            '    chatContainer.appendChild(welcomeDiv);',
+            '  } else {',
+            '    // Nachrichten laden',
+            '    data.messages.forEach(function(msg) {',
+            '      addMessage(msg.content, msg.role, { thinking: msg.thinking });',
+            '    });',
+            '  }',
+            '  ',
+            '  // Attachments',
+            '  if (data.attachedFiles && data.attachedFiles.length > 0) {',
+            '    attachmentsDiv.style.display = "flex";',
+            '    attachmentsDiv.innerHTML = data.attachedFiles.map(function(f, i) {',
+            '      return "<div class=\\"attachment\\">📄 " + escapeHtml(f) + " <span class=\\"attachment-remove\\" onclick=\\"removeAttachment(" + i + ")\\">×</span></div>";',
+            '    }).join("");',
+            '  } else {',
+            '    attachmentsDiv.style.display = "none";',
+            '    attachmentsDiv.innerHTML = "";',
+            '  }',
+            '  ',
+            '  // Modus',
+            '  isPlanMode = data.isPlanMode || false;',
+            '  setMode(isPlanMode ? "plan" : "chat");',
+            '}',
             '',
             '// Modus wechseln',
             'function setMode(mode) {',
@@ -955,9 +1250,21 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             '    ',
             '    case "chatCleared":',
             '      chatContainer.innerHTML = "";',
-            '      welcome.style.display = "block";',
-            '      chatContainer.appendChild(welcome);',
+            '      const welcomeEl = document.getElementById("welcome");',
+            '      if (welcomeEl) {',
+            '        welcomeEl.style.display = "block";',
+            '        chatContainer.appendChild(welcomeEl);',
+            '      }',
             '      recreatePlan();',
+            '      break;',
+            '    ',
+            '    // Tab-Events',
+            '    case "tabsUpdated":',
+            '      updateTabs(data.tabs, data.activeTabId);',
+            '      break;',
+            '    ',
+            '    case "tabContent":',
+            '      loadTabContent(data);',
             '      break;',
             '  }',
             '});',
