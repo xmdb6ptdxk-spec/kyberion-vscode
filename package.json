@@ -1,0 +1,146 @@
+{
+  "name": "kyberion-vscode",
+  "displayName": "Kyberion - KI Assistent",
+  "description": "Kybernetikon AI Assistant für VS Code - Chat, Plan/Act Modus, Datei-Integration",
+  "version": "1.0.0",
+  "publisher": "kybernetikon",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Machine Learning",
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "assistant",
+    "chat",
+    "kyberion",
+    "deepseek",
+    "gemini"
+  ],
+  "icon": "media/kyberion-icon.png",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "kyberion-sidebar",
+          "title": "Kyberion",
+          "icon": "media/kyberion-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "kyberion-sidebar": [
+        {
+          "type": "webview",
+          "id": "kyberion.chatView",
+          "name": "Chat"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "kyberion.openChat",
+        "title": "Kyberion: Chat öffnen",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "kyberion.connect",
+        "title": "Kyberion: Verbinden"
+      },
+      {
+        "command": "kyberion.disconnect",
+        "title": "Kyberion: Trennen"
+      },
+      {
+        "command": "kyberion.analyzeFile",
+        "title": "Mit Kyberion analysieren"
+      },
+      {
+        "command": "kyberion.showStatus",
+        "title": "Kyberion: Status anzeigen"
+      },
+      {
+        "command": "kyberion.togglePlanMode",
+        "title": "Kyberion: Plan/Act Modus umschalten"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "kyberion.analyzeFile",
+          "group": "navigation",
+          "when": "resourceScheme == file"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "kyberion.analyzeFile",
+          "group": "navigation"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "kyberion.openChat",
+        "key": "cmd+shift+k",
+        "mac": "cmd+shift+k",
+        "when": "editorTextFocus"
+      }
+    ],
+    "configuration": {
+      "title": "Kyberion",
+      "properties": {
+        "kyberion.forgeWsUrl": {
+          "type": "string",
+          "default": "ws://localhost:8000/ws/nexus",
+          "description": "WebSocket URL der Forge Synapse"
+        },
+        "kyberion.autoConnect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatisch beim Start verbinden"
+        },
+        "kyberion.showThinking": {
+          "type": "boolean",
+          "default": true,
+          "description": "Kyberions Gedanken anzeigen (Gemini)"
+        },
+        "kyberion.devDirectory": {
+          "type": "string",
+          "default": "/Users/gregorklauss/dev",
+          "description": "Verzeichnis für Datei-Operationen"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run esbuild-base -- --production",
+    "esbuild-base": "node esbuild.js",
+    "compile": "npm run esbuild-base",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "lint": "eslint src --ext ts",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.5.10",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "esbuild": "^0.27.1",
+    "eslint": "^8.54.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "node-fetch": "^2.7.0",
+    "ws": "^8.16.0"
+  }
+}
