@@ -223,7 +223,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Datei anhängen
+     * Datei anhängen - erlaubt alle Dateien ohne Einschränkung
      */
     private async handleAttachFile() {
         const files = await vscode.window.showOpenDialog({
@@ -239,16 +239,26 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
         if (files && files.length > 0) {
             for (const file of files) {
-                const content = await this.fileHandler.readFile(file.fsPath);
-                if (content) {
+                try {
+                    // Direkt mit VS Code API lesen (keine Sicherheitseinschränkungen)
+                    const fileContent = await vscode.workspace.fs.readFile(file);
+                    const content = new TextDecoder('utf-8').decode(fileContent);
                     const fileName = file.fsPath.split('/').pop() || file.fsPath;
                     this.attachedFiles.push({ name: fileName, content: content });
+                    console.log('📎 Datei angehängt:', fileName);
+                } catch (error) {
+                    console.error('Fehler beim Lesen der Datei:', file.fsPath, error);
+                    vscode.window.showErrorMessage(`Konnte Datei nicht lesen: ${file.fsPath}`);
                 }
             }
-            this.postMessage({ 
-                type: 'fileAttached', 
-                files: this.attachedFiles.map(f => f.name) 
-            });
+            
+            if (this.attachedFiles.length > 0) {
+                this.postMessage({ 
+                    type: 'fileAttached', 
+                    files: this.attachedFiles.map(f => f.name) 
+                });
+                vscode.window.showInformationMessage(`${this.attachedFiles.length} Datei(en) angehängt`);
+            }
         }
     }
 
